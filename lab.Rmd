@@ -18,6 +18,7 @@ base <- read.csv2('herbicidas.csv', sep = ';')
 ```{r}
 library(dplyr)
 library(ggplot2)
+library(car)
 ```
 
 b. En sentido estricto la dosis es una variable continua, sin embargo, puede
@@ -229,13 +230,149 @@ original). Calcule el log(odds) a partir de las proporciones observadas. Use
 la función `scatterplot` de la librería `lattice.`
 
 ```{r}
-library(car)
-
 logodds = log((prop)/(1 - prop))
 
 scatterplot(logodds~base$dosis,xlab="dosis",ylab="log(odds)")
 ```
 
++ En la figura se observa que para el intervalo 0 a 200, hay un comportamiento diferente al resto del intervalo estudiado, lo cual hace pensar que la relación general entre el log(odds) y la dosis no es lineal- El modelo que se ajusta con la variable dosis en forma continua no está siguiendo lo que se observa en este gráfico.
+
+b. Escriba la ecuación estimada de la regresión logística tomando la dosis en
+su forma continua.
+
+$$log(\frac{\pi}{1- \pi}) = \beta_0+\beta_1X_{dosis}$$
+
+```{r}
+mod2 <- glm(cbind(mal, 20 - mal) ~ dosis, family = 'binomial', data = base)
+```
+
+c. ¿Cuál es la probabilidad de daño para una dosis de 300 g/l? Hágalo
+utilizando la ecuación anterior y también con la función predict indicando
+la dosis así `data.frame(dosis=300)`, y con la opción `type="response"`.
+
+```{r}
+#manual
+#primero extraemos el beta
+coefs <- mod2$coefficients
+eta = c(1,300) %*% coefs
+
+(prob300 <- exp(eta)/(1+exp(eta)))
+
+#automatica
+predict(mod2, data.frame(dosis = 300), type = 'response')
+```
+
++ Al aumentar la dosis en 300 g/l la propensión de daño aumenta un 36% 
+
+d. Haga un gráfico donde se muestren los porcentajes de hojas dañadas por
+planta contra la dosis (use la variable dosis original). Agregue la curva
+de las probabilidades estimadas según la ecuación del punto (a). Ponga
+los límites de dosis entre 0 y 2000 para apreciar la forma de la ecuación
+logística. Marque el punto correspondiente a la dosis 300 y su probabilidad
+de daño.
+
+```{r}
+curve(exp(coefs[1]+coefs[2]*x)/(1+exp(coefs[1]+coefs[2]*x)),0,2000,
+ylab="probabilidad",xlab="dosis",ylim=c(0,1))
+
+points(base$dosis,base$mal/20,pch=18,col=2)
+
+points(300,prob300,col=4,pch="+",cex=1.5)
+
+a=round(coefs[1],2) 
+b=format(round(coefs[2],3),scientific=F)
+
+title(main=(bquote(log(pi/(1-pi))==.(a)+.(b)*D)))
+```
+
+7. Interpretación del coeficiente:
+
+a. Interprete el coeficiente de la dosis adecuadamente. Use un aumento de la
+dosis que tenga importancia.
+
+```{r}
+exp(200*0.003)
+```
+
++ Al aumentar la dosis en 200 g/l, la propensión de daño aumenta un 82%.
+
+b. Calcule e interprete un intervalo de 95% de confianza para este aumento.
+
+```{r}
+confint(mod2)
+
+(ic=exp(200*confint(mod2)[2,]))
+```
+
++ Se obtiene que al aumentar la dosis en 200 g/l, se puede esperar con 95% de
+confianza que la propensión de daño aumente por un factor que está entre el 1;60
+y 1;94. Aunque aquí no hay un delta, como se trata de aumentos porcentuales,
+se puede ver que ya un aumento de 60% en la propensión es cosiderable y por
+tanto se nota que aumentos de este tamaño en la dosis (200 g/l) van a provocar
+aumentos relevantes en la probabilidad de daño.
+
+8. Inclusión del segundo factor
+
+a. Agregue en el modelo logístico el genotipo e incluya la interacción
+entre dosis y genotipo. Antes de correr el modelo cambie al modelo de
+tratamiento referencia y verifique el cambio con `contrasts(genotipo)`.
+
+```{r}
+contrasts(base$genotipo)
+
+mod3 <- glm(cbind(mal, 20 - mal) ~ dosis*genotipo, family = 'binomial', data = base)
+```
+
+b. Investigue si debe considerarse la interacción entre dosis y genotipo.
+
++ Para eso planteamos la hipótesis de que el modelo grande explica lo mismo que el modelo sin interacción.  
+
+```{r}
+drop1(mod3, test = 'LRT')
+```
+
++ Hay suficiente evidencia estadística para rechazar la hipótesis de no interacción. Por lo que se concluye que el modelo con sin interacción no explica lo mismo que el modelo con interacción. Se asume interacción. Por lo tanto se concluye
+que sí hay interacción y por ende el efecto de la dosis es diferente para cada
+genotipo. Dada esta situación es más recomendable hacer las comparaciones
+entre dosis pero por cada genotipo.
+
+c. Escriba la ecuación correspondiente a cada genotipo.
+
+$$log(\frac{\pi}{1-\pi}) = \beta_0+\beta_1X_{dosis}+\beta_2X_S+\beta_3DosisGen_S$$
+
+d. Calcule e interprete los OR adecuados.
+
+```{r}
+(beta=mod3$coef)
+
+(OR.R=exp(200*beta[2]))
+
+(OR.S=exp(200*(beta[2]+beta[4])))
+```
+
+
+e. Calcule los intervalos de 95% de confianza global para estos aumentos en
+la propensión de daño para cada genotipo.
+
+```{r}
+c1=c(0,200,0,0)
+c2=c(0,200,0,200)
+h=cbind(c1,c2)
+eta=t(h)%*%beta
+ee=sqrt(diag(t(h)%*%vcov(mod3)%*%h))
+k=2
+qz=qnorm(1-0.05/(2*k))
+ic=cbind(exp(eta-qz*ee),exp(eta+qz*ee))
+rownames(ic)=c("R","S")
+colnames(ic)=c("L.Inf","L.Sup")
+ic
+```
+
+f. Interprete estos intervalos.
+
+Para el genotipo R, cuando se incrementa la dosis en 200 g/l, la propensión
+aumenta entre un 32% y un 78%, mientras que para el genotipo S aumenta por
+un factor entre 1,75 y 2,4.
 
 
 
