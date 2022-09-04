@@ -1,0 +1,244 @@
+---
+title: 'Lab regresión logística'
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+1. Preparación
+
+a. Cargue el archivo `herbicidas.csv`. Cada fila representa una planta. En
+la columna *mal* se registra el número de hojas que tienen daños en cada
+planta. Revise las variables.
+
+```{r}
+base <- read.csv2('herbicidas.csv', sep = ';')
+```
+
+```{r}
+library(dplyr)
+library(ggplot2)
+```
+
+b. En sentido estricto la dosis es una variable continua, sin embargo, puede
+tratarse como factor si el investigador sólo está interesado en los niveles
+en que se ha realizado el experimento, mientras que si existe un interés en
+hacer interpolaciones, se debe tomar la variable en su forma original. Cree una variable llamada dosix que sea factor y mantenga la variable dosis
+original. En algunos análisis se usa como factor y en otros en su forma
+continua.
+
+```{r}
+base$dosisx <- factor(base$dosis)
+```
+
+
+2. Visualización de datos:
+
+a. Haga un gráfico de la proporción de daño por planta contra las dosis (use
+dosix). Recuerde que en cada planta se tiene el mismo número de hojas
+(20), por lo que la proporción será simplemente el número de dañadas
+sobre 20.
+
+
+```{r}
+prop <-  (base$mal/20)
+boxplot((base$mal/20) ~ base$dosisx, ylab = 'Proporción de daño', xlab = 'dosis')
+```
+
+
+b. ¿Cómo se comporta la proporción de daño para las diferentes dosis?
+
++ Parece ser que la proporción de hojas dañadas para las distintas dosis es distinta. Por ejemplo, para la dosis 200 la media anda al rededor de 0.4 y un máximo de 0.6, mientras que para la dosis 400 la media es de alrededor 0.5 y su valor máximo como de 0.75. Para la dosis de 800 se observa una mayor proporción de hojas dañadas, es de esperar debido que el salto de dosis es del doble. 
+
+3. Estimación del modelo logístico:
+
+a. Utilice la dosis como factor en un modelo logístico con la función
+glm, incluyendo el parámetro `family=binomial`. Cuando los datos están
+agrupados hay que poner como respuesta el número de éxitos (daños)
+y el número de fracasos (no daños) unidos con la función cbind, de la
+siguiente forma: `glm(cbind(y,n-y)~x,family=binomial)`, donde y es el
+número de éxitos por grupo y n es el número total de individuos en cada
+grupo. Si hubiera al menos una covariable a nivel de la hoja, los datos no
+podrían estar agrupados y cada línea representaría una hoja en lugar de un
+conjunto de hojas. En ese caso la respuesta sería totalmente binaria donde
+se indicaría si la hoja está dañada o no. La forma de escribir el modelo
+sería: `glm(y~x,family=binomial)`. Estime los coeficientes del modelo de
+tratamiento referencia.
+
+
+```{r}
+mod <- glm(cbind(mal, 20 - mal) ~ dosisx, family = 'binomial', data = base)
+```
+
+b. Escriba la ecuación estimada del modelo logístico.
+
+$$log(\frac{\pi}{1- \pi})=-2.43+2.15X_{200}+2.29X_{400}+3.05X_{800}$$
+
+c. Estime los coeficientes con suma nula
+
+```{r}
+options(contrasts=c("contr.sum","contr.poly"))
+
+mod1 = glm(cbind(mal, 20 - mal) ~ dosisx, family = 'binomial', data = base)
+
+```
+
+d. Escriba la ecuación estimada del modelo logístico. Use la función
+`contrasts` para ver cuál de los niveles está usando como referencia.
+
+```{r}
+contrasts(base$dosisx)
+```
+
+$$log(\frac{\pi}{1- \pi})=-0.557-1.874X_0+0.278X_{200}+0.418X_{400}$$
+
+e. Estime la probabilidad de encontrar una hoja dañada para cada
+tratamiento usando el modelo de tratamiento referencia. Hágalo
+manualmente y también hágalo con la función `predict`, usando
+`type`="`response`".
+
+```{r}
+#de forma manual
+coefs = mod$coefficients
+beta0 <- coefs[1]
+taus <- coefs
+taus[1] <- 0
+
+p1 = exp(beta0 + taus)/(1 + exp(beta0 + taus))
+names(p1) <- c('D0', 'D200', 'D400','D800')
+
+round(p1, 3)
+
+#forma automática
+predict(mod, type = 'response')
+```
+
+f. ¿Cuál es el promedio estimado de hojas dañadas por planta en cada
+tratamiento, si la planta tiene 1500 hojas?
+
+```{r}
+1500 * p1
+```
+
+4. Prueba de hipótesis sobre efecto de dosis:
+
+a. Pruebe que existe un efecto de la dosis sobre la probabilidad de daño en
+las hojas. Para usar la prueba de la razón de verosimilitud (LRT), use la
+función `drop1` con el parámetro `test="LRT"`. Verifique que sin importar
+cuál modelo se use (suma nula o tratamiento referencia), se obtiene el
+mismo resultado en la prueba.
+
+
+```{r}
+drop1(mod, test = 'LRT')
+```
+
++ Al realizar la prueba de la razón de verosimilitud, se observa que se maximiza la deviancia porque para el modelo grande es de 68.548 mientras que para el modelo donde se elimina la dosis es de 276.66 que proviene de una chi-cuadrado con 3 grados de libertad. Se rechaza la hipótesis de que ambos modelo explican lo mismo. Se concluye que hay un efecto de la dosis sobre la probabilidad de daño. 
+
+5. Comparaciones:
+
+a. Compare la propensión de daño entre cada par de tratamientos. Para
+esto use el OR para comparar dos tratamientos. Utilice el modelo de
+tratamiento referencia y defina los contrastes adecuados.
+
+
+```{r}
+#contrastes
+d800.d400 <- c(0,0,-1,1)
+d800.d200 <- c(0,-1,0,1)
+d800.d0 <- c(0,0,0,1)
+d400.d200 <- c(0,-1,1,0)
+d400.d0 <- c(0,0,1,0)
+d200.d0 <- c(0,1,0,0)
+
+h <- cbind(d800.d400,d800.d200,d800.d0,d400.d200,d400.d0,d200.d0)
+
+eta <- t(h) %*% coefs
+
+oddr <- exp(eta)
+
+oddr
+```
+
+- Se puede decir que los Odds para 800 - 400 y 800 - 200 son los más notorios.
+
+b. Haga las pruebas de hipótesis para verificar que cada par de tratamientos
+tienen probabilidades iguales. Use hipótesis alternativa de una cola. Para
+esto nos basamos en los contrastes construidos y comprobamos que si
+las probabilidades de dos tratamientos son iguales, es decir $\pi_i$ = $\pi_j$, la
+razón de propensiones asociada debe ser igual a uno (OR=1). Todas las
+comparaciones son de la forma OR = exp($\eta$), y para que el OR sea igual
+a 1 basta que $\eta$ = 0. Entonces se pueden hacer las pruebas simultáneas
+de todos los contrastes usando la distribución normal con corrección de
+Bonferroni.
+
+```{r}
+ee <- sqrt(diag(t(h) %*% vcov(mod) %*% h))
+q = eta/ee
+
+round(pnorm(q, lower.tail = F), 10)
+```
+
+c. Encuentre los intervalos de 95% de confianza global para todas las
+comparaciones del punto anterior donde se encontraron diferencias.
+Puesto que se hacen varios intervalos de forma simultánea, se debe hacer
+el ajuste de Bonferroni para el valor del cuantil así: `qnorm(1-0.05/(2*k))`,
+donde k es el número de comparaciones. Observe qué tan amplios son los
+intervalos para tener una idea de la precisión de la estimación, además
+compare esas amplitudes con los errores estándar de cada contraste.
+
+```{r}
+qz = qnorm(1-0.05/(2*5))
+
+IC = cbind(exp(eta-qz*ee),exp(eta+qz*ee))[-4,]
+
+
+
+ic1=cbind(IC,ee[-4])
+
+colnames(ic1)=c("L.Inf","L.Sup","ee")
+
+ic1
+```
+
++ Las comparaciones contra la dosis 0 son muy imprecisas, en cambio las
+comparaciones entre dosis 800 y las otras dos dosis son más precisas. Esto es una consecuencia de que estas dos últimas comparaciones tienen errores estándar
+más pequeños.
+
+
+```{r}
+qz=qnorm(1-0.05/(2*5))
+
+LIM=exp(eta-qz*ee)[-4]
+
+names(LIM)=rownames(oddr)[-4]
+LIM
+```
+
++ Con una confianza global de 95%, se puede decir que la propensión de daño
+para D800 es al menos 40% mayor que la de D400, 61% mayor que la de D200 y
+es 11.5 veces la de D0, que la propensión de daño de D400 es al menos 5.4 veces
+la de D0 y la propensión de daño de D200 es al menos 4.7 veces la de D0.
+
+6. Análisis con dosis continua:
+
+a. Ahora se va a utilizar la dosis en su forma continua, es decir, se pueden
+hacer interpolaciones para diferentes dosis en el rango de estudio. Haga un
+gráfico donde se muestre el log(odds) contra la dosis (use la variable dosis
+original). Calcule el log(odds) a partir de las proporciones observadas. Use
+la función `scatterplot` de la librería `lattice.`
+
+```{r}
+library(car)
+
+logodds = log((prop)/(1 - prop))
+
+scatterplot(logodds~base$dosis,xlab="dosis",ylab="log(odds)")
+```
+
+
+
+
+
+
+
